@@ -6761,6 +6761,10 @@ WOLFSSL_LOCAL WC_RNG* WOLFSSL_RSA_GetRNG(WOLFSSL_RSA *rsa, WC_RNG **tmpRNG,
     #if !defined(NO_SKID) && !defined(GetCAByName)
         WOLFSSL_LOCAL Signer* GetCAByName(void* vp, byte* hash);
     #endif
+    #if !defined(NO_SKID) && !defined(GetNextCAByName)
+        WOLFSSL_LOCAL Signer* GetNextCAByName(void* vp, byte* hash,
+                                              Signer* prev);
+    #endif
 #endif /* !NO_CERTS */
 WOLFSSL_LOCAL int  BuildTlsHandshakeHash(WOLFSSL* ssl, byte* hash,
                                    word32* hashLen);

@@ -25103,6 +25103,27 @@ static int CheckCertSignature_ex(const byte* cert, word32 certSz, void* heap,
                 sigIndex - tbsCertIdx, ca->publicKey, ca->pubKeySize,
                 ca->keyOID, cert + idx, len, signatureOID, sigParams,
                 sigParamsSz, NULL);
+        #ifndef NO_SKID
+            /* If signature failed and CA was found by name (no AKID),
+             * try other CAs with same subject (cross-signed certs) */
+            if (ret != 0 && !extAuthKeyIdSet) {
+                Signer* nextCa = GetNextCAByName(cm, hash, ca);
+                while (nextCa != NULL) {
+                    FreeSignatureCtx(sigCtx);
+                    InitSignatureCtx(sigCtx, heap, INVALID_DEVID);
+                    ret = ConfirmSignature(sigCtx, cert + tbsCertIdx,
+                        sigIndex - tbsCertIdx, nextCa->publicKey,
+                        nextCa->pubKeySize, nextCa->keyOID,
+                        cert + idx, len, signatureOID, sigParams,
+                        sigParamsSz, NULL);
+                    if (ret == 0) {
+                        WOLFSSL_MSG("Verified with alternate CA by name");
+                        break;
+                    }
+                    nextCa = GetNextCAByName(cm, hash, nextCa);
+                }
+            }
+        #endif /* !NO_SKID */
         }
         if (ret != 0) {
             WOLFSSL_ERROR_VERBOSE(ret);
@@ -25305,6 +25326,26 @@ static int CheckCertSignature_ex(const byte* cert, word32 certSz, void* heap,
             ret = ConfirmSignature(sigCtx, tbs, tbsSz, pubKey, pubKeySz,
                 (word32)pubKeyOID, sig, sigSz, sigOID, sigParams, sigParamsSz,
                 NULL);
+        #ifndef NO_SKID
+            /* If signature failed and CA was found by name (no AKID),
+             * try other CAs with same subject (cross-signed certs) */
+            if (ret != 0 && ca != NULL && !extAuthKeyIdSet) {
+                Signer* nextCa = GetNextCAByName(cm, hash, ca);
+                while (nextCa != NULL) {
+                    FreeSignatureCtx(sigCtx);
+                    InitSignatureCtx(sigCtx, heap, INVALID_DEVID);
+                    ret = ConfirmSignature(sigCtx, tbs, tbsSz,
+                        nextCa->publicKey, nextCa->pubKeySize,
+                        (word32)nextCa->keyOID, sig, sigSz, sigOID,
+                        sigParams, sigParamsSz, NULL);
+                    if (ret == 0) {
+                        WOLFSSL_MSG("Verified with alternate CA by name");
+                        break;
+                    }
+                    nextCa = GetNextCAByName(cm, hash, nextCa);
+                }
+            }
+        #endif /* !NO_SKID */
             if (ret != 0) {
                 WOLFSSL_MSG("Confirm signature failed");
             }
@@ -26084,11 +26125,48 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm,
                         NULL, 0,
                     #endif
                         sce_tsip_encRsaKeyIdx)) != 0) {
-                    if (ret != WC_NO_ERR_TRACE(WC_PENDING_E)) {
-                        WOLFSSL_MSG("Confirm signature failed");
+                #ifndef NO_SKID
+                    /* If CA was found by name (no AKID), try other CAs
+                     * with the same subject name but different keys
+                     * (cross-signed certificates) */
+                    if (ret != WC_NO_ERR_TRACE(WC_PENDING_E) &&
+                            !cert->extAuthKeyIdSet) {
+                        Signer* nextCa = GetNextCAByName(cm,
+                            cert->issuerHash, cert->ca);
+                        while (nextCa != NULL) {
+                            FreeSignatureCtx(&cert->sigCtx);
+                            InitSignatureCtx(&cert->sigCtx, cert->heap,
+                                INVALID_DEVID);
+                            ret = ConfirmSignature(&cert->sigCtx,
+                                cert->source + cert->certBegin,
+                                cert->sigIndex - cert->certBegin,
+                                nextCa->publicKey, nextCa->pubKeySize,
+                                nextCa->keyOID, cert->signature,
+                                cert->sigLength, cert->signatureOID,
+                            #ifdef WC_RSA_PSS
+                                cert->source + cert->sigParamsIndex,
+                                cert->sigParamsLength,
+                            #else
+                                NULL, 0,
+                            #endif
+                                sce_tsip_encRsaKeyIdx);
+                            if (ret == 0) {
+                                cert->ca = nextCa;
+                                WOLFSSL_MSG("Verified with alternate CA");
+                                break;
+                            }
+                            nextCa = GetNextCAByName(cm,
+                                cert->issuerHash, nextCa);
+                        }
                     }
-                    WOLFSSL_ERROR_VERBOSE(ret);
-                    return ret;
+                #endif /* !NO_SKID */
+                    if (ret != 0) {
+                        if (ret != WC_NO_ERR_TRACE(WC_PENDING_E)) {
+                            WOLFSSL_MSG("Confirm signature failed");
+                        }
+                        WOLFSSL_ERROR_VERBOSE(ret);
+                        return ret;
+                    }
                 }
 
             #ifdef WOLFSSL_DUAL_ALG_CERTS

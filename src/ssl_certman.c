@@ -2833,6 +2833,42 @@ Signer* GetCAByName(void* vp, byte* hash)
 
     return ret;
 }
+
+/* return next CA after prev with matching name hash, otherwise NULL.
+ * Used when multiple CAs share the same subject name (cross-signed certs).
+ * Walk through hash table starting after prev. */
+Signer* GetNextCAByName(void* vp, byte* hash, Signer* prev)
+{
+    WOLFSSL_CERT_MANAGER* cm = (WOLFSSL_CERT_MANAGER*)vp;
+    Signer* ret = NULL;
+    Signer* signers;
+    word32  row;
+    int     foundPrev = 0;
+
+    if (cm == NULL || prev == NULL)
+        return NULL;
+
+    if (wc_LockMutex(&cm->caLock) != 0)
+        return ret;
+
+    for (row = 0; row < CA_TABLE_SIZE && ret == NULL; row++) {
+        signers = cm->caTable[row];
+        while (signers && ret == NULL) {
+            if (!foundPrev) {
+                if (signers == prev)
+                    foundPrev = 1;
+            }
+            else if (XMEMCMP(hash, signers->subjectNameHash,
+                        SIGNER_DIGEST_SIZE) == 0) {
+                ret = signers;
+            }
+            signers = signers->next;
+        }
+    }
+    wc_UnLockMutex(&cm->caLock);
+
+    return ret;
+}
 #endif
 
 #ifdef WOLFSSL_TRUST_PEER_CERT
