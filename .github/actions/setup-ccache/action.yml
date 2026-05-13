@@ -48,13 +48,14 @@ runs:
         # so cache misses are easy to debug in workflow logs.
         ccache -p | grep -E "max_size|compression|cache_dir" || true
 
-    - name: Restore ccache
+    - name: Restore/save ccache (post-step saves at job end)
       id: cache-restore
-      uses: actions/cache/restore@v4
+      uses: actions/cache@v4
       with:
         path: ~/.cache/ccache
-        # Date in the key forces a fresh save every day so the cache doesn't
-        # grow without bound. restore-keys still matches older keys for hits.
+        # Suffix the primary key with run_id so each run creates its own
+        # cache entry; restore-keys lets later runs fall back to any prior
+        # save under the same workflow.
         key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-${{ github.run_id }}
         restore-keys: |
           ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-
@@ -87,10 +88,3 @@ runs:
         echo "::group::ccache stats after build"
         ccache -s || true
         echo "::endgroup::"
-
-    - name: Save ccache
-      if: always()
-      uses: actions/cache/save@v4
-      with:
-        path: ~/.cache/ccache
-        key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-${{ github.run_id }}
