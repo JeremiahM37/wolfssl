@@ -35,6 +35,7 @@ jobs:
         uses: ./.github/actions/setup-ccache
         with:
           key: no-malloc
+          matrix-key: ${{ strategy.job-index }}
 
       - name: Test wolfSSL
         run: |

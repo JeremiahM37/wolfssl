@@ -2,9 +2,13 @@ name: 'Set up ccache'
 description: 'Install ccache, configure it as the C compiler driver, and restore/save the cache across runs'
 inputs:
   key:
-    description: 'Extra suffix to scope the cache (e.g. workflow name + config). Combined with runner.os + arch.'
+    description: 'Workflow-scope cache key (typically the workflow name). Combined with runner.os + arch.'
     required: false
     default: 'default'
+  matrix-key:
+    description: 'Per-matrix-entry scope. Pass strategy.job-index or a hash of matrix.config so each entry caches independently. Leave empty for single-job workflows.'
+    required: false
+    default: ''
   max-size:
     description: 'ccache max size (e.g. 500M, 2G). Default keeps GHA cache budget reasonable.'
     required: false
@@ -48,18 +52,31 @@ runs:
         # so cache misses are easy to debug in workflow logs.
         ccache -p | grep -E "max_size|compression|cache_dir" || true
 
+    - name: Compute cache key
+      id: keys
+      shell: bash
+      run: |
+        BASE="ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}"
+        if [ -n "${{ inputs.matrix-key }}" ]; then
+          BASE="${BASE}-mx${{ inputs.matrix-key }}"
+        fi
+        echo "primary=${BASE}-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+        # Restore-keys cascade: most-specific first.
+        {
+          echo "restore<<EOF"
+          echo "${BASE}-"
+          echo "ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-"
+          echo "ccache-${{ runner.os }}-${{ runner.arch }}-"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Restore/save ccache (post-step saves at job end)
       id: cache-restore
       uses: actions/cache@v4
       with:
         path: ~/.cache/ccache
-        # Suffix the primary key with run_id so each run creates its own
-        # cache entry; restore-keys lets later runs fall back to any prior
-        # save under the same workflow.
-        key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-${{ github.run_id }}
-        restore-keys: |
-          ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-
-          ccache-${{ runner.os }}-${{ runner.arch }}-
+        key: ${{ steps.keys.outputs.primary }}
+        restore-keys: ${{ steps.keys.outputs.restore }}
 
     - name: Reset ccache stats for this run
       shell: bash
