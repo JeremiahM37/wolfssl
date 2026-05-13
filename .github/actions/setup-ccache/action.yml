@@ -1,0 +1,96 @@
+name: 'Set up ccache'
+description: 'Install ccache, configure it as the C compiler driver, and restore/save the cache across runs'
+inputs:
+  key:
+    description: 'Extra suffix to scope the cache (e.g. workflow name + config). Combined with runner.os + arch.'
+    required: false
+    default: 'default'
+  max-size:
+    description: 'ccache max size (e.g. 500M, 2G). Default keeps GHA cache budget reasonable.'
+    required: false
+    default: '500M'
+  install:
+    description: 'Install ccache via apt if not present.'
+    required: false
+    default: 'true'
+outputs:
+  cache-hit:
+    description: 'Whether the ccache restore step found a matching cache.'
+    value: ${{ steps.cache-restore.outputs.cache-hit }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Install ccache
+      if: inputs.install == 'true'
+      shell: bash
+      run: |
+        if ! command -v ccache >/dev/null 2>&1; then
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -q
+            sudo apt-get install -y --no-install-recommends ccache
+          elif command -v brew >/dev/null 2>&1; then
+            brew install ccache
+          else
+            echo "::error::ccache not present and no supported package manager found"
+            exit 1
+          fi
+        fi
+        ccache --version | head -1
+
+    - name: Configure ccache
+      shell: bash
+      run: |
+        ccache --set-config=max_size=${{ inputs.max-size }}
+        ccache --set-config=compression=true
+        ccache --set-config=compression_level=1
+        # ccache hashes the source contents (direct mode) and only falls back
+        # to preprocessed mode on mismatch. The defaults are fine; print them
+        # so cache misses are easy to debug in workflow logs.
+        ccache -p | grep -E "max_size|compression|cache_dir" || true
+
+    - name: Restore ccache
+      id: cache-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/ccache
+        # Date in the key forces a fresh save every day so the cache doesn't
+        # grow without bound. restore-keys still matches older keys for hits.
+        key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-${{ github.run_id }}
+        restore-keys: |
+          ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-
+          ccache-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Reset ccache stats for this run
+      shell: bash
+      run: ccache -z >/dev/null
+
+    - name: Export ccache compiler shims
+      shell: bash
+      run: |
+        # Prepend ccache's compiler symlinks dir to PATH so `gcc`/`clang`/`g++`
+        # invocations transparently route through ccache without configure
+        # needing to know about it. This matches how Debian/Ubuntu ship ccache.
+        if [ -d /usr/lib/ccache ]; then
+            echo "/usr/lib/ccache" >> "$GITHUB_PATH"
+        else
+            # macOS / homebrew layout
+            CCACHE_LIBEXEC=$(ccache --print-config 2>/dev/null | awk -F= '/^libexec_dir/{print $2}' | tr -d ' ' || true)
+            if [ -n "$CCACHE_LIBEXEC" ] && [ -d "$CCACHE_LIBEXEC" ]; then
+                echo "$CCACHE_LIBEXEC" >> "$GITHUB_PATH"
+            fi
+        fi
+
+    - name: Post — print ccache stats
+      shell: bash
+      if: always()
+      run: |
+        echo "::group::ccache stats after build"
+        ccache -s || true
+        echo "::endgroup::"
+
+    - name: Save ccache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}-${{ github.run_id }}
