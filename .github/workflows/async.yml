@@ -3,7 +3,7 @@ name: Async Tests
 # START OF COMMON SECTION
 on:
   push:
-    branches: [ 'master', 'main', 'release/**' ]
+    branches: [ 'master', 'main', 'release/**', 'ci-ccache' ]
   pull_request:
     branches: [ '*' ]
 
