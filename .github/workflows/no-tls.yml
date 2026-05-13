@@ -21,7 +21,7 @@ jobs:
           '--disable-tls --enable-all CFLAGS="-pedantic -Wdeclaration-after-statement -Wnull-dereference -DTEST_LIBWOLFSSL_SOURCES_INCLUSION_SEQUENCE"',
         ]
     name: make check
-    if: github.repository_owner == 'wolfssl'
+    if: github.repository_owner == 'wolfssl' || github.repository_owner == 'JeremiahM37'
     runs-on: ubuntu-24.04
     # This should be a safe limit for the tests to run.
     timeout-minutes: 6
